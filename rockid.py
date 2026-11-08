@@ -23,7 +23,12 @@ from PIL import Image, ImageEnhance, ImageGrab, ImageOps, ImageTk
 
 import sys
 
-if getattr(sys, "frozen", False):          # running as RockID.exe
+import updater
+
+APP_VERSION = "1.2"  # bump this, and tag the GitHub release "v<same number>"
+FROZEN = getattr(sys, "frozen", False)
+
+if FROZEN:          # running as RockID.exe
     APP_DIR = os.path.dirname(sys.executable)
     BUNDLE_DIR = getattr(sys, "_MEIPASS", APP_DIR)
 else:
@@ -59,6 +64,8 @@ DEFAULT_CONFIG = {
     "show_debug": False,
     "pos": [60, 60],
     "alpha": 0.9,
+    "check_updates": True,
+    "skip_version": None,
 }
 
 
@@ -347,6 +354,10 @@ class OrePicker:
         self.tol = self._spin(s, "OCR tolerance (+/-)", 0, 50, app.cfg["tolerance"])
         self.intv = self._spin(s, "Scan every (ms)", 150, 3000, app.cfg["interval_ms"], inc=50)
         self.alpha = self._spin(s, "Opacity %", 30, 100, int(app.cfg["alpha"] * 100), inc=5)
+        self.upd = tk.BooleanVar(value=app.cfg.get("check_updates", True))
+        tk.Checkbutton(s, text="Check for updates at start", variable=self.upd, command=self.apply,
+                       bg=BG, fg=DIM, selectcolor=BG2, activebackground=BG, activeforeground=FG,
+                       font=("Segoe UI", 9)).pack(side="left")
         self._btn(s, "Close", w.destroy).pack(side="right")
         exclude_from_capture(w)
 
@@ -383,6 +394,7 @@ class OrePicker:
     def apply(self):
         cfg = self.app.cfg
         cfg["targets"] = [k for k, v in self.vars.items() if v.get()]
+        cfg["check_updates"] = bool(self.upd.get())
         try:
             cfg["tolerance"] = max(0, int(self.tol.get()))
             cfg["interval_ms"] = max(150, int(self.intv.get()))
@@ -392,6 +404,99 @@ class OrePicker:
         self.app.root.attributes("-alpha", cfg["alpha"])
         self.app.save()
         self.app.render()
+
+
+# ---------------------------------------------------------------- update dialog
+class UpdateDialog:
+    def __init__(self, app, info):
+        self.app, self.info = app, info
+        self.win = w = tk.Toplevel(app.root)
+        w.title("SC Rock ID - update available")
+        w.configure(bg=BG, padx=14, pady=12)
+        w.attributes("-topmost", True)
+        w.resizable(False, False)
+        w.protocol("WM_DELETE_WINDOW", self.later)
+
+        tk.Label(w, text=f"Version {info['version_str']} is available", bg=BG, fg=GREEN,
+                 font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x")
+        tk.Label(w, text=f"You have v{APP_VERSION}.  {info['title']}", bg=BG, fg=DIM,
+                 font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 6))
+        if info["notes"]:
+            t = tk.Text(w, width=58, height=min(10, info["notes"].count("\n") + 2), bg=BG2, fg=FG,
+                        relief="flat", font=("Segoe UI", 9), wrap="word", padx=6, pady=4)
+            t.insert("1.0", info["notes"][:1500])
+            t.configure(state="disabled")
+            t.pack(fill="x", pady=(0, 8))
+        self.status = tk.Label(w, text="", bg=BG, fg=FG, font=("Segoe UI", 9), anchor="w")
+        self.status.pack(fill="x")
+
+        row = tk.Frame(w, bg=BG)
+        row.pack(fill="x", pady=(8, 0))
+        can_install = FROZEN and info.get("url")
+        if can_install:
+            self.go = app._big_btn(row, "Download and install", self.install)
+        else:  # running from source, or no exe attached: just open the release page
+            self.go = app._big_btn(row, "Open download page", self.open_page)
+        self.go.pack(side="left", padx=(0, 6))
+        self.later_btn = app._big_btn(row, "Later", self.later, bg=BG2, fg=FG)
+        self.later_btn.pack(side="left", padx=(0, 6))
+        self.skip_btn = app._big_btn(row, "Skip this version", self.skip, bg=BG2, fg=DIM)
+        self.skip_btn.pack(side="left")
+        exclude_from_capture(w)
+        w.focus_force()
+
+    def close(self):
+        self.app.update_dialog = None
+        self.win.destroy()
+
+    def later(self):
+        self.close()
+
+    def skip(self):
+        self.app.cfg["skip_version"] = self.info["version_str"]
+        self.app.save()
+        self.close()
+
+    def open_page(self):
+        webbrowser.open(self.info["page"])
+        self.close()
+
+    def install(self):
+        for b in (self.go, self.later_btn, self.skip_btn):
+            b.configure(state="disabled")
+        self.win.protocol("WM_DELETE_WINDOW", lambda: None)
+        exe = sys.executable
+        new = os.path.join(os.path.dirname(exe), "RockID.new.exe")
+        q = self.app.events
+
+        def progress(done, total):
+            pct = f"{done * 100 // total}%" if total else f"{done // 1048576} MB"
+            q.put(lambda: self.status.configure(text=f"Downloading… {pct}"))
+
+        def work():
+            try:
+                updater.download(self.info, new, progress)
+                q.put(lambda: self._installed(new, exe))
+            except Exception as e:
+                q.put(lambda: self._failed(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _installed(self, new, exe):
+        self.status.configure(text="Installing - Rock ID will restart…", fg=GREEN)
+        self.win.update()
+        try:
+            updater.install_and_restart(new, exe, os.getpid())
+        except Exception as e:
+            self._failed(e)
+            return
+        self.app.quit()
+
+    def _failed(self, err):
+        self.status.configure(text=f"Update failed: {err}", fg=RED)
+        for b in (self.later_btn, self.skip_btn):
+            b.configure(state="normal")
+        self.go.configure(state="normal", text="Open download page", command=self.open_page)
+        self.win.protocol("WM_DELETE_WINDOW", self.later)
 
 
 # ---------------------------------------------------------------- main HUD
@@ -411,6 +516,8 @@ class App:
         self.error = ""
         self.countdown = 0
         self._pick_job = None
+        self.events = queue.Queue()  # messages from background threads (update checks)
+        self.update_dialog = None
 
         self.root = r = tk.Tk()
         r.title("SC Rock ID")
@@ -426,7 +533,9 @@ class App:
         bar.pack(fill="x")
         title = tk.Label(bar, text="  ◆ ROCK ID", bg=BG2, fg=ACCENT, font=("Segoe UI", 10, "bold"))
         title.pack(side="left", pady=3)
-        for wdg in (bar, title):
+        ver = tk.Label(bar, text=f"v{APP_VERSION}", bg=BG2, fg=DIM, font=("Segoe UI", 7))
+        ver.pack(side="left", padx=(3, 0), pady=(5, 0))
+        for wdg in (bar, title, ver):
             wdg.bind("<ButtonPress-1>", self._drag_start)
             wdg.bind("<B1-Motion>", self._drag_move)
             wdg.bind("<ButtonRelease-1>", self._drag_end)
@@ -470,6 +579,8 @@ class App:
         self.scanner.start()
         self.render()
         r.after(100, self.poll)
+        if self.cfg.get("check_updates", True):
+            r.after(3000, lambda: self.check_updates(manual=False))
 
     # ---- small widgets
     def _tbtn(self, parent, text, cmd, hover=ACCENT):
@@ -497,6 +608,7 @@ class App:
         m.add_command(label="Set scan area…", command=self.start_pick)
         m.add_command(label="Toggle refinery", command=self.toggle_refinery)
         m.add_command(label="Toggle debug", command=self.toggle_debug)
+        m.add_command(label="Check for updates…", command=lambda: self.check_updates(manual=True))
         m.add_separator()
         m.add_command(label="Quit", command=self.quit)
         m.tk_popup(e.x_root, e.y_root)
@@ -597,7 +709,38 @@ class App:
                                          "Language > add English (United States).", parent=self.root)
         except queue.Empty:
             pass
+        try:
+            while True:
+                fn = self.events.get_nowait()  # callables queued by background threads
+                fn()
+        except queue.Empty:
+            pass
         self.root.after(100, self.poll)
+
+    # ---- updates
+    def check_updates(self, manual):
+        def work():
+            try:
+                info = updater.fetch_latest()
+                self.events.put(lambda: self._update_result(info, None, manual))
+            except Exception as e:
+                self.events.put(lambda: self._update_result(None, e, manual))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_result(self, info, error, manual):
+        if error is not None:
+            if manual:
+                messagebox.showwarning("SC Rock ID", f"Could not check for updates:\n{error}", parent=self.root)
+            return
+        local = updater.parse_version(APP_VERSION)
+        if not updater.is_newer(info["version"], local):
+            if manual:
+                messagebox.showinfo("SC Rock ID", f"You have the latest version (v{APP_VERSION}).", parent=self.root)
+            return
+        if not manual and info["version_str"] == self.cfg.get("skip_version"):
+            return
+        if self.update_dialog is None:
+            self.update_dialog = UpdateDialog(self, info)
 
     # ---- drawing
     def render(self):

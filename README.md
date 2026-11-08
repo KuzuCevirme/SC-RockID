@@ -35,6 +35,14 @@ A cluster's signature is the single-rock value × the number of rocks. For examp
 ## After a patch
 All values are in `data.json`, which you can edit. The current values are from patch 4.10.2.
 
+## Updates
+At start, the exe checks GitHub for a newer release. If there is one, it offers **Download and install**, **Later** or **Skip this version**. The download is checked against the size and SHA-256 that GitHub reports, then the exe swaps itself and restarts. You can turn the check off in **Ores** settings, or check by hand from the right-click menu: **Check for updates…**
+
+**Publishing a new version:**
+1. Raise `APP_VERSION` in `rockid.py`.
+2. Run `build.bat`.
+3. Create a GitHub release with the tag `v<that version>` (for example `v1.3`) and attach `release\RockID.exe`.
+
 ## Building the exe yourself
 Run `install.bat` once, then `build.bat`. The exe is written to `release\RockID.exe`. To check that a built exe works, run `RockID.exe --selftest`; it writes `selftest.txt` next to the exe.
 
@@ -42,6 +50,7 @@ Run `install.bat` once, then `build.bat`. The exe is written to `release\RockID.
 | File | Purpose |
 |---|---|
 | `rockid.py` | The whole app (HUD, screen capture, OCR, matching) |
+| `updater.py` | Checks GitHub releases, downloads, verifies and installs updates |
 | `data.json` | Ore signatures and refinery bonuses (edit after a patch) |
 | `requirements.txt` / `install.bat` | Python packages |
 | `build.bat` | Builds `release\RockID.exe` |
