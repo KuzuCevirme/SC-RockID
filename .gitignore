@@ -8,3 +8,5 @@ dist/
 *.spec
 __pycache__/
 *.pyc
+# developer notes stay on this PC only
+DEVELOPER.md
