@@ -12,7 +12,7 @@ A small always-on-top HUD that reads the mining-scan signature number off your s
 
 **From source:** run `install.bat` once, then `Start Rock ID.bat`.
 
-Run Star Citizen in **Borderless** or **Windowed** mode, because exclusive fullscreen screenshots come out black. On first start, open your mining scanner and drag a box around the signature number.
+Run Star Citizen in **Borderless** or **Windowed** mode, because exclusive fullscreen screenshots come out black. On first start, the HUD shows a **📍 Pick signature area** button. Open your mining scanner in game, then click the button. You get 5 seconds to switch to the game, then the screen freezes and you drag a box around the signature number. Click **⌖** to pick the area again later.
 
 ## Where settings are saved
 `config.json`, next to `RockID.exe` (or `rockid.py`). It holds your scan area, the ores you picked, the window position and options. Delete it to start fresh, or click ⌖ to choose a new scan area. If you put a `data.json` next to the exe, the exe uses it instead of its built-in values.

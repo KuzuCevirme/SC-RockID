@@ -409,6 +409,8 @@ class App:
         self.raw = ""
         self.thumb = None
         self.error = ""
+        self.countdown = 0
+        self._pick_job = None
 
         self.root = r = tk.Tk()
         r.title("SC Rock ID")
@@ -431,7 +433,7 @@ class App:
         self._tbtn(bar, "✕", self.quit, RED).pack(side="right")
         self.pause_btn = self._tbtn(bar, "⏸", self.toggle_pause)
         self.pause_btn.pack(side="right")
-        self._tbtn(bar, "⌖", lambda: RegionPicker(self)).pack(side="right")
+        self._tbtn(bar, "⌖", self.start_pick).pack(side="right")
         self.ref_btn = self._tbtn(bar, "Refinery", self.toggle_refinery)
         self.ref_btn.pack(side="right")
         self._tbtn(bar, "Ores", lambda: OrePicker(self)).pack(side="right")
@@ -468,8 +470,6 @@ class App:
         self.scanner.start()
         self.render()
         r.after(100, self.poll)
-        if not self.cfg.get("region"):
-            r.after(400, self.first_run)
 
     # ---- small widgets
     def _tbtn(self, parent, text, cmd, hover=ACCENT):
@@ -494,7 +494,7 @@ class App:
     def _menu(self, e):
         m = tk.Menu(self.root, tearoff=0)
         m.add_command(label="Pick ores…", command=lambda: OrePicker(self))
-        m.add_command(label="Set scan area…", command=lambda: RegionPicker(self))
+        m.add_command(label="Set scan area…", command=self.start_pick)
         m.add_command(label="Toggle refinery", command=self.toggle_refinery)
         m.add_command(label="Toggle debug", command=self.toggle_debug)
         m.add_separator()
@@ -512,13 +512,37 @@ class App:
         self.save()
 
     # ---- actions
-    def first_run(self):
-        messagebox.showinfo("SC Rock ID",
-                            "First start: select the screen area where the mining scan shows the "
-                            "signature number.\n\nOpen your mining scanner in game (Star Citizen must "
-                            "run in Borderless or Windowed mode), then press OK and drag a box around "
-                            "the number.", parent=self.root)
+    PICK_DELAY = 5  # seconds to switch to the game before the screen is frozen
+
+    def start_pick(self):
+        """Count down so you can switch to the game, then freeze the screen for picking."""
+        if self.countdown:
+            return
+        self.countdown = self.PICK_DELAY
+        self.render()
+        self._pick_job = self.root.after(1000, self._pick_tick)
+
+    def _pick_tick(self):
+        self.countdown -= 1
+        if self.countdown <= 0:
+            self.pick_now()
+        else:
+            self.render()
+            self._pick_job = self.root.after(1000, self._pick_tick)
+
+    def pick_now(self):
+        if self._pick_job:
+            self.root.after_cancel(self._pick_job)
+            self._pick_job = None
+        self.countdown = 0
         RegionPicker(self)
+
+    def cancel_pick(self):
+        if self._pick_job:
+            self.root.after_cancel(self._pick_job)
+            self._pick_job = None
+        self.countdown = 0
+        self.render()
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -583,8 +607,19 @@ class App:
         tol = self.cfg["tolerance"]
         detected_ids = []
 
-        if not self.cfg.get("region"):
-            self._line("No scan area set - click ⌖", DIM)
+        if self.countdown:
+            self._line(f"Switch to the game now…  {self.countdown}", YELLOW, size=13, bold=True)
+            self._line("The screen will freeze, then drag a box around the signature number.", FG, size=9)
+            row = tk.Frame(self.body, bg=BG)
+            row.pack(anchor="w", pady=(6, 2))
+            self._big_btn(row, "Pick now", self.pick_now).pack(side="left", padx=(0, 6))
+            self._big_btn(row, "Cancel", self.cancel_pick, bg=BG2, fg=FG).pack(side="left")
+        elif not self.cfg.get("region"):
+            self._line("Set up the scan area", ACCENT, size=13, bold=True)
+            self._line("1.  Start Star Citizen (Borderless or Windowed mode).", FG, size=9)
+            self._line("2.  Open the mining scanner so a signature number is on screen.", FG, size=9)
+            self._line(f"3.  Click the button below. You get {self.PICK_DELAY} seconds to switch to the game.", FG, size=9)
+            self._big_btn(self.body, "📍  Pick signature area", self.start_pick).pack(anchor="w", pady=(8, 2))
         elif self.paused:
             self._line("Paused", DIM)
         elif not self.nums:
@@ -642,8 +677,14 @@ class App:
                 self.dbg_img.configure(image=self._dbg_photo)
             self.dbg_frame.pack(fill="x")
 
-    def _line(self, text, color, size=11):
-        tk.Label(self.body, text=text, bg=BG, fg=color, font=("Segoe UI", size), anchor="w").pack(fill="x")
+    def _line(self, text, color, size=11, bold=False):
+        tk.Label(self.body, text=text, bg=BG, fg=color, font=("Segoe UI", size, "bold" if bold else "normal"),
+                 anchor="w", justify="left", wraplength=380).pack(fill="x")
+
+    def _big_btn(self, parent, text, cmd, bg=ACCENT, fg=BG):
+        return tk.Button(parent, text=text, command=cmd, bg=bg, fg=fg, activebackground=GREEN,
+                         activeforeground=BG, relief="flat", bd=0, cursor="hand2",
+                         font=("Segoe UI", 10, "bold"), padx=12, pady=4)
 
     def _render_refinery(self, detected_ids):
         for w in self.ref_frame.winfo_children():
