@@ -1,0 +1,10 @@
+# personal settings (scan area, picked ores)
+config.json
+selftest.txt
+# build output - upload RockID.exe as a GitHub Release instead
+release/
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
